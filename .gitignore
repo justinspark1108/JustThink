@@ -49,3 +49,8 @@ prompt
 server.log
 # Skills directory
 /skills/
+# API credentials - DO NOT COMMIT
+.z-ai-config
+*.token
+.env.local
+.env.development.local

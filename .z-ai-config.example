@@ -1,0 +1,7 @@
+{
+  "baseUrl": "YOUR_API_BASE_URL",
+  "apiKey": "YOUR_API_KEY",
+  "token": "YOUR_X_TOKEN",
+  "userId": "YOUR_USER_ID",
+  "chatId": "YOUR_CHAT_ID"
+}

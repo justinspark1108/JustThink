@@ -16,7 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { Brain, Send, HelpCircle, CheckCircle2, AlertCircle, XCircle, Sparkles, Loader2, Mic, MicOff, AlertTriangle } from 'lucide-react';
+import { Brain, Send, HelpCircle, CheckCircle2, AlertCircle, XCircle, Sparkles, Loader2, Mic, MicOff, AlertTriangle, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Puzzle {
@@ -24,9 +24,7 @@ interface Puzzle {
   scenario: string;
   difficulty: string;
   theme: string;
-  _solution: string;
-  _solutionSummary: string;
-  _keyElements: string[];
+  solution: string;
 }
 
 interface Message {
@@ -56,7 +54,7 @@ export default function Home() {
   const [isAsking, setIsAsking] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Voice input state
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
@@ -129,7 +127,7 @@ export default function Home() {
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         setPuzzle(data.puzzle);
       } else {
@@ -147,7 +145,7 @@ export default function Home() {
 
     const userQuestion = question.trim();
     setQuestion('');
-    
+
     const questionId = Date.now().toString();
     setMessages(prev => [...prev, { id: questionId, type: 'question', content: userQuestion }]);
     setIsAsking(true);
@@ -159,7 +157,7 @@ export default function Home() {
         body: JSON.stringify({
           question: userQuestion,
           scenario: puzzle.scenario,
-          solution: puzzle._solution,
+          solution: puzzle.solution,
           conversationHistory: messages.filter(m => m.type === 'question').map((m, i) => ({
             question: m.content,
             answer: messages.filter(m => m.type === 'answer')[i]?.content || ''
@@ -168,12 +166,12 @@ export default function Home() {
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         setMessages(prev => [...prev, { id: `${questionId}-answer`, type: 'answer', content: data.answer }]);
         setQuestionCount(prev => prev + 1);
       } else {
-        setMessages(prev => [...prev, { id: `${questionId}-error`, type: 'error', content: 'Rate limited. Please wait a moment and try again.' }]);
+        setMessages(prev => [...prev, { id: `${questionId}-error`, type: 'error', content: data.error || 'Failed to get answer.' }]);
       }
     } catch {
       setMessages(prev => [...prev, { id: `${questionId}-error`, type: 'error', content: 'Connection error. Please try again.' }]);
@@ -193,18 +191,17 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userSolution: solutionText.trim(),
-          actualSolution: puzzle._solution,
-          solutionSummary: puzzle._solutionSummary,
+          actualSolution: puzzle.solution,
           scenario: puzzle.scenario
         }),
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         setSolutionResult(data.evaluation);
       } else {
-        setError(data.error || 'Failed to evaluate solution. Please try again.');
+        setError(data.error || 'Failed to evaluate solution.');
       }
     } catch {
       setError('Connection error. Please try again.');
@@ -256,8 +253,18 @@ export default function Home() {
     }
   };
 
+  const resetGame = () => {
+    setPuzzle(null);
+    setMessages([]);
+    setQuestionCount(0);
+    setSolutionResult(null);
+    setShowSolution(false);
+    setSolutionText('');
+    setError(null);
+  };
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <header className="border-b border-border/40 backdrop-blur-sm bg-background/80 sticky top-0 z-50">
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -269,7 +276,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-8">
+      <main className="max-w-4xl mx-auto px-4 py-8 flex-1">
         {/* Home Screen - No Puzzle Yet */}
         {!puzzle && !isLoading && (
           <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
@@ -311,16 +318,16 @@ export default function Home() {
                         <SelectItem value="mystery">Mystery</SelectItem>
                         <SelectItem value="logic">Logic</SelectItem>
                         <SelectItem value="survival">Survival</SelectItem>
-                        <SelectItem value="horror/dark">Horror/Dark</SelectItem>
-                        <SelectItem value="crime/detective">Crime/Detective</SelectItem>
+                        <SelectItem value="horror">Horror</SelectItem>
+                        <SelectItem value="crime">Crime</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
 
-                <Button 
-                  onClick={generatePuzzle} 
-                  className="w-full" 
+                <Button
+                  onClick={generatePuzzle}
+                  className="w-full"
                   size="lg"
                 >
                   <Sparkles className="mr-2 h-4 w-4" />
@@ -364,15 +371,21 @@ export default function Home() {
                   {puzzle.theme}
                 </Badge>
               </div>
-              <Badge variant="secondary" className="flex items-center gap-1">
-                <HelpCircle className="h-3 w-3" />
-                {questionCount} questions
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="flex items-center gap-1">
+                  <HelpCircle className="h-3 w-3" />
+                  {questionCount} questions
+                </Badge>
+                <Button variant="ghost" size="sm" onClick={resetGame}>
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  New
+                </Button>
+              </div>
             </div>
 
             {/* Two Column Layout for larger screens */}
             <div className="grid lg:grid-cols-2 gap-6">
-              {/* Left: Scenario Card - Always visible */}
+              {/* Left: Scenario Card */}
               <Card className="border-2 lg:sticky lg:top-24 lg:self-start">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg font-semibold flex items-center gap-2">
@@ -391,7 +404,7 @@ export default function Home() {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Ask Yes/No Questions {speechSupported && <span className="text-xs">(voice enabled 🎤)</span>}
+                    Ask Yes/No Questions {speechSupported && <span className="text-xs">(voice enabled)</span>}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -412,16 +425,16 @@ export default function Home() {
                         )}
                       >
                         {msg.type === 'answer' && (
-                          <Badge 
-                            variant="outline" 
+                          <Badge
+                            variant="outline"
                             className={cn("px-3 py-1.5 text-sm font-medium", getAnswerColor(msg.content))}
                           >
                             {msg.content}
                           </Badge>
                         )}
                         {msg.type === 'error' && (
-                          <Badge 
-                            variant="outline" 
+                          <Badge
+                            variant="outline"
                             className="px-3 py-1.5 text-sm font-medium bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20"
                           >
                             <AlertTriangle className="h-3 w-3 mr-1" />
@@ -472,18 +485,18 @@ export default function Home() {
                         )}
                       </Button>
                     )}
-                    <Button 
-                      onClick={askQuestion} 
+                    <Button
+                      onClick={askQuestion}
                       disabled={!question.trim() || isAsking || solutionResult !== null}
                       size="icon"
                     >
                       <Send className="h-4 w-4" />
                     </Button>
                   </div>
-                  
+
                   {isListening && (
                     <p className="text-xs text-muted-foreground animate-pulse">
-                      🎤 Listening... speak your question
+                      Listening... speak your question
                     </p>
                   )}
                 </CardContent>
@@ -492,7 +505,7 @@ export default function Home() {
 
             {/* Solution Section */}
             <Separator />
-            
+
             <Card className={cn(
               solutionResult?.status === 'correct' && "border-green-500/50",
               solutionResult?.status === 'partial' && "border-yellow-500/50",
@@ -532,7 +545,7 @@ export default function Home() {
                       className="resize-none"
                     />
                     <div className="flex gap-2">
-                      <Button 
+                      <Button
                         onClick={submitSolution}
                         disabled={!solutionText.trim() || isSubmitting}
                         className="flex-1"
@@ -541,8 +554,8 @@ export default function Home() {
                         Submit Answer
                       </Button>
                       {solutionResult && solutionResult.status !== 'correct' && (
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           onClick={() => setShowSolution(true)}
                         >
                           Reveal Solution
@@ -552,8 +565,8 @@ export default function Home() {
                   </>
                 ) : (
                   <div className="flex gap-2">
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       onClick={() => setShowSolution(true)}
                       className="flex-1"
                     >
@@ -567,7 +580,7 @@ export default function Home() {
                   <div className="p-4 rounded-lg bg-muted/50 border border-border/50">
                     <h4 className="font-semibold mb-2">The Solution:</h4>
                     <p className="text-sm text-muted-foreground leading-relaxed">
-                      {puzzle._solution}
+                      {puzzle.solution}
                     </p>
                   </div>
                 )}
@@ -576,17 +589,9 @@ export default function Home() {
 
             {/* Generate New Puzzle */}
             <div className="flex justify-center pt-4">
-              <Button 
-                variant="outline" 
-                onClick={() => {
-                  setPuzzle(null);
-                  setMessages([]);
-                  setQuestionCount(0);
-                  setSolutionResult(null);
-                  setShowSolution(false);
-                  setSolutionText('');
-                  setError(null);
-                }}
+              <Button
+                variant="outline"
+                onClick={resetGame}
                 className="gap-2"
               >
                 <Sparkles className="h-4 w-4" />
@@ -600,7 +605,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t border-border/40 mt-auto">
         <div className="max-w-4xl mx-auto px-4 py-6 text-center text-sm text-muted-foreground">
-          AI-powered lateral thinking puzzles • Ask yes/no questions to solve the mystery
+          AI-powered lateral thinking puzzles - Ask yes/no questions to solve the mystery
         </div>
       </footer>
     </div>
