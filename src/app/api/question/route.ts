@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ZAI from 'z-ai-web-dev-sdk';
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,7 +11,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const zai = await ZAI.create();
+    // Load z.ai config
+    const fs = await import('fs');
+    const os = await import('os');
+    const homeDir = os.homedir();
+    const configPaths = [
+      `${process.cwd()}/.z-ai-config`,
+      `${homeDir}/.z-ai-config`,
+    ];
+
+    let config = null;
+    for (const filePath of configPaths) {
+      try {
+        const configStr = await fs.default.promises.readFile(filePath, 'utf-8');
+        config = JSON.parse(configStr);
+        break;
+      } catch {
+        continue;
+      }
+    }
+
+    if (!config) {
+      return NextResponse.json(
+        { success: false, error: 'Configuration file not found.' },
+        { status: 500 }
+      );
+    }
 
     const historyText = conversationHistory?.length > 0
       ? conversationHistory.map((h: { question: string; answer: string }) => `Q: ${h.question}\nA: ${h.answer}`).join('\n')
@@ -43,15 +67,40 @@ ${historyText}
 
 Remember: ONLY respond with YES, NO, or NOT RELEVANT. Nothing else.`;
 
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: question }
-      ],
-      temperature: 0.1
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
-    let answer = completion.choices[0]?.message?.content?.trim().toUpperCase() || 'NOT RELEVANT';
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'glm-4-plus',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: question }
+        ],
+        temperature: 0.1,
+        max_tokens: 50
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    const responseDataRaw = await response.text();
+
+    if (!response.ok) {
+      console.error('Question API Error:', response.status, responseDataRaw.substring(0, 200));
+      return NextResponse.json(
+        { success: false, error: `API Error: ${response.statusText}` },
+        { status: response.status }
+      );
+    }
+
+    const responseJson = JSON.parse(responseDataRaw);
+    let answer = responseJson.choices?.[0]?.message?.content?.trim().toUpperCase() || 'NOT RELEVANT';
 
     // Normalize the answer
     if (answer.includes('NOT RELEVANT') || answer.includes('NOT-RELEVANT') || answer.includes('IRRELEVANT')) {
@@ -71,23 +120,6 @@ Remember: ONLY respond with YES, NO, or NOT RELEVANT. Nothing else.`;
 
   } catch (error) {
     console.error('Question answering error:', error);
-
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-    if (errorMessage.includes('401') || errorMessage.includes('X-Token')) {
-      return NextResponse.json(
-        { success: false, error: 'AI service authentication failed.' },
-        { status: 500 }
-      );
-    }
-
-    if (errorMessage.includes('429')) {
-      return NextResponse.json(
-        { success: false, error: 'Too many requests. Please wait a moment.' },
-        { status: 429 }
-      );
-    }
-
     return NextResponse.json(
       { success: false, error: 'Failed to answer question.' },
       { status: 500 }

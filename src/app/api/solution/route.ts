@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ZAI from 'z-ai-web-dev-sdk';
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,7 +11,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const zai = await ZAI.create();
+    // Load z.ai config
+    const fs = await import('fs');
+    const os = await import('os');
+    const homeDir = os.homedir();
+    const configPaths = [
+      `${process.cwd()}/.z-ai-config`,
+      `${homeDir}/.z-ai-config`,
+    ];
+
+    let config = null;
+    for (const filePath of configPaths) {
+      try {
+        const configStr = await fs.default.promises.readFile(filePath, 'utf-8');
+        config = JSON.parse(configStr);
+        break;
+      } catch {
+        continue;
+      }
+    }
+
+    if (!config) {
+      return NextResponse.json(
+        { success: false, error: 'Configuration file not found.' },
+        { status: 500 }
+      );
+    }
 
     const systemPrompt = `You are evaluating a player's solution to a lateral thinking puzzle.
 
@@ -27,7 +51,7 @@ ${userSolution}
 
 Evaluate how close the player's solution is to the actual solution.
 
-Respond in JSON format only:
+Respond in JSON format only, no markdown fences:
 {
   "isCorrect": true or false,
   "accuracy": 0-100,
@@ -47,15 +71,44 @@ IMPORTANT:
 - Semantic similarity counts - different words, same meaning = correct
 - Don't penalize for missing minor details if the core is there`;
 
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: 'Please evaluate my solution.' }
-      ],
-      temperature: 0.2
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
 
-    const responseText = completion.choices[0]?.message?.content || '';
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'glm-4-plus',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: 'Please evaluate my solution.' }
+        ],
+        temperature: 0.2,
+        max_tokens: 300
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    const responseDataRaw = await response.text();
+
+    if (!response.ok) {
+      console.error('Solution API Error:', response.status, responseDataRaw.substring(0, 200));
+      return NextResponse.json(
+        { success: false, error: `API Error: ${response.statusText}` },
+        { status: response.status }
+      );
+    }
+
+    const responseJson = JSON.parse(responseDataRaw);
+    let responseText = responseJson.choices?.[0]?.message?.content || '';
+
+    // Strip markdown fences
+    responseText = responseText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
 
     if (!jsonMatch) {
@@ -87,23 +140,6 @@ IMPORTANT:
 
   } catch (error) {
     console.error('Solution evaluation error:', error);
-
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-    if (errorMessage.includes('401') || errorMessage.includes('X-Token')) {
-      return NextResponse.json(
-        { success: false, error: 'AI service authentication failed.' },
-        { status: 500 }
-      );
-    }
-
-    if (errorMessage.includes('429')) {
-      return NextResponse.json(
-        { success: false, error: 'Too many requests. Please wait a moment.' },
-        { status: 429 }
-      );
-    }
-
     return NextResponse.json(
       { success: false, error: 'Failed to evaluate solution.' },
       { status: 500 }
