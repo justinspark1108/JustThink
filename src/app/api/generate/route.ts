@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getAIConfig, AI_MODEL } from '@/lib/config';
 
 const DIFFICULTY_PROMPTS: Record<string, string> = {
   easy: `SOLVABLE IN ABOUT 5-10 QUESTIONS. One surprising fact. Instant "aha" when discovered. NO hallucinations, dreams, or unreliable narrators.`,
@@ -21,6 +22,15 @@ export async function POST(request: NextRequest) {
     const difficultyPrompt = DIFFICULTY_PROMPTS[difficulty] || DIFFICULTY_PROMPTS.medium;
     const themePrompt = THEME_PROMPTS[theme] || THEME_PROMPTS.mystery;
 
+    const config = await getAIConfig();
+
+    if (!config) {
+      return NextResponse.json(
+        { success: false, error: 'AI configuration not found. Set ZAI_BASE_URL and ZAI_API_KEY environment variables, or create a .z-ai-config file.' },
+        { status: 500 }
+      );
+    }
+
     const systemPrompt = `You create lateral thinking puzzles with satisfying "aha" moments.
 
 DIFFICULTY: ${difficultyPrompt}
@@ -41,33 +51,6 @@ Return ONLY valid JSON, no markdown fences, no explanation:
 
     const userPrompt = `Create a ${difficulty} ${theme} lateral thinking puzzle. Return ONLY the JSON object.`;
 
-    // Use z.ai API (load config)
-    const fs = await import('fs');
-    const os = await import('os');
-    const homeDir = os.homedir();
-    const configPaths = [
-      `${process.cwd()}/.z-ai-config`,
-      `${homeDir}/.z-ai-config`,
-    ];
-
-    let config = null;
-    for (const filePath of configPaths) {
-      try {
-        const configStr = await fs.default.promises.readFile(filePath, 'utf-8');
-        config = JSON.parse(configStr);
-        break;
-      } catch {
-        continue;
-      }
-    }
-
-    if (!config) {
-      return NextResponse.json(
-        { success: false, error: 'Configuration file not found.' },
-        { status: 500 }
-      );
-    }
-
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60000);
 
@@ -78,7 +61,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
         'Authorization': `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify({
-        model: 'glm-4-plus',
+        model: AI_MODEL,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
@@ -93,24 +76,20 @@ Return ONLY valid JSON, no markdown fences, no explanation:
     const responseDataRaw = await response.text();
 
     if (!response.ok) {
-      console.error('API Error:', response.status, responseDataRaw.substring(0, 300));
+      console.error('Generate API Error:', response.status, responseDataRaw.substring(0, 300));
       return NextResponse.json(
         { success: false, error: `API Error: ${response.statusText}` },
         { status: response.status }
       );
     }
 
-    // Parse response - GLM-4.7 puts thinking in reasoning_content and output in content
     const responseJson = JSON.parse(responseDataRaw);
     const message = responseJson.choices?.[0]?.message || {};
     let content = message.content || '';
     const reasoningContent = message.reasoning_content || '';
 
-    // If content is empty, the model's reasoning consumed all tokens before outputting
-    // Fall back to extracting JSON from reasoning content
+    // Fallback: extract JSON from reasoning content if main content is empty
     if (!content.trim() && reasoningContent) {
-      console.log('Content empty, extracting from reasoning...');
-      // Look for JSON in the reasoning output (model often writes it there before finishing)
       const jsonMatch = reasoningContent.match(/\{[\s\S]*"scenario"[\s\S]*?"solution"[\s\S]*?\}/);
       if (jsonMatch) {
         content = jsonMatch[0];
@@ -118,9 +97,9 @@ Return ONLY valid JSON, no markdown fences, no explanation:
     }
 
     if (!content.trim()) {
-      console.error('No usable content. Reasoning was too long.');
+      console.error('No usable content from model');
       return NextResponse.json(
-        { success: false, error: 'AI is still thinking... Please try again.' },
+        { success: false, error: 'AI model returned empty response. Please try again.' },
         { status: 500 }
       );
     }
@@ -128,7 +107,7 @@ Return ONLY valid JSON, no markdown fences, no explanation:
     // Strip markdown code fences if present
     content = content.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
-    // Extract JSON object (handle any extra text around it)
+    // Extract JSON object
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error('No JSON found:', content.substring(0, 200));

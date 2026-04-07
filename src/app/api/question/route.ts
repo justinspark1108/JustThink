@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getAIConfig, AI_MODEL } from '@/lib/config';
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,29 +12,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Load z.ai config
-    const fs = await import('fs');
-    const os = await import('os');
-    const homeDir = os.homedir();
-    const configPaths = [
-      `${process.cwd()}/.z-ai-config`,
-      `${homeDir}/.z-ai-config`,
-    ];
-
-    let config = null;
-    for (const filePath of configPaths) {
-      try {
-        const configStr = await fs.default.promises.readFile(filePath, 'utf-8');
-        config = JSON.parse(configStr);
-        break;
-      } catch {
-        continue;
-      }
-    }
+    const config = await getAIConfig();
 
     if (!config) {
       return NextResponse.json(
-        { success: false, error: 'Configuration file not found.' },
+        { success: false, error: 'AI configuration not found. Set ZAI_BASE_URL and ZAI_API_KEY environment variables.' },
         { status: 500 }
       );
     }
@@ -77,7 +60,7 @@ Remember: ONLY respond with YES, NO, or NOT RELEVANT. Nothing else.`;
         'Authorization': `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify({
-        model: 'glm-4-plus',
+        model: AI_MODEL,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: question }
