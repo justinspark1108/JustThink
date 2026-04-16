@@ -1,26 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAIConfig, AI_MODEL } from '@/lib/config';
 
-const DIFFICULTY_PROMPTS: Record<string, string> = {
-  easy: `SOLVABLE IN ABOUT 5-10 QUESTIONS. One surprising fact. Instant "aha" when discovered. NO hallucinations, dreams, or unreliable narrators.`,
-  medium: `SOLVABLE IN ABOUT 15-25 QUESTIONS. Two connected facts to discover. Straightforward reality with a twist.`,
-  hard: `SOLVABLE IN 30+ QUESTIONS. Multiple layers to uncover. MAY include hallucinations, dreams, or unreliable perception - but ONLY if written carefully (see rules below).`
-};
-
 const THEME_PROMPTS: Record<string, string> = {
-  mystery: `Something unexplained with a logical reveal.`,
-  logic: `A situation that makes sense once you understand the context.`,
-  survival: `Someone in danger - the reason becomes clear through questioning.`,
-  horror: `A dark scenario with a chilling but logical explanation.`,
-  crime: `A suspicious event with a clear explanation.`
+  crime: `A suspicious event — a crime or seemingly criminal situation with a clear, logical explanation. Think motives, alibis, red herrings, and unexpected innocence.`,
+  'dark horror': `A dark, unsettling scenario with a chilling but perfectly logical explanation. Think psychological horror, not supernatural — the horror comes from understanding what really happened.`,
+  logic: `A situation that seems impossible or paradoxical but makes complete sense once you understand the hidden context or constraint. Pure reasoning, no gore needed.`
 };
 
 export async function POST(request: NextRequest) {
   try {
-    const { difficulty, theme } = await request.json();
+    const { theme } = await request.json();
 
-    const difficultyPrompt = DIFFICULTY_PROMPTS[difficulty] || DIFFICULTY_PROMPTS.medium;
-    const themePrompt = THEME_PROMPTS[theme] || THEME_PROMPTS.mystery;
+    const themePrompt = THEME_PROMPTS[theme] || THEME_PROMPTS.crime;
 
     const config = await getAIConfig();
 
@@ -33,23 +24,23 @@ export async function POST(request: NextRequest) {
 
     const systemPrompt = `You create lateral thinking puzzles with satisfying "aha" moments.
 
-DIFFICULTY: ${difficultyPrompt}
 THEME: ${themePrompt}
 
 RULES:
-1. The scenario describes a surprising situation - NOT the solution
+1. The scenario describes a surprising situation — NOT the solution
 2. The solution must be discoverable through yes/no questions
-3. No direct contradictions - scenario must be technically true
-4. No lying as objective fact - narrator cannot state falsehoods
+3. No direct contradictions — scenario must be technically true
+4. No lying as objective fact — narrator cannot state falsehoods
 5. Reactions must logically fit the cause
 6. Solution must give a clear "aha" moment
-7. Be original - no famous puzzle variations
+7. Be original — no famous puzzle variations
 8. Keep the scenario concise (2-3 sentences)
+9. Aim for solvability in about 15-25 questions for a thoughtful player
 
 Return ONLY valid JSON, no markdown fences, no explanation:
 {"scenario": "A surprising situation.", "solution": "The logical explanation."}`;
 
-    const userPrompt = `Create a ${difficulty} ${theme} lateral thinking puzzle. Return ONLY the JSON object.`;
+    const userPrompt = `Create a ${theme} lateral thinking puzzle. Return ONLY the JSON object.`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60000);
@@ -131,7 +122,6 @@ Return ONLY valid JSON, no markdown fences, no explanation:
       puzzle: {
         id: Date.now().toString(),
         scenario: puzzle.scenario,
-        difficulty,
         theme,
         solution: puzzle.solution
       }
